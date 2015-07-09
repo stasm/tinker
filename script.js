@@ -1,44 +1,43 @@
 $(function() {
 
+  var config = {
+    escapeHtml: true,
+  };
+
+
   /* L20n */
-
-  var parser = new L20n.Parser();
-  var compiler = new L20n.Compiler();
-
-  var _retr = new L20n.RetranslationManager();
-  compiler.setGlobals(_retr.globals);
-
-  var entries;
-  var data;
 
   function update() {
     $("#errors").empty();
     $("#output").empty();
 
-    var code = source.getValue();
-    var ast = parser.parse(code);
+    var args;
+
     try {
-      data = JSON.parse(context.getValue());
+      args = JSON.parse(context.getValue());
     } catch (e) {}
-    entries = compiler.compile(ast);
+
+    var code = source.getValue();
+    L20n.ASTParser.parse(null, code, true)._errors.forEach(log);
+    var entries = L20n.EntriesParser.parse(noop, code);
+    var ctx = new L20n.MockContext(entries);
 
     for (var id in entries) {
-      if (entries[id].expression) {
-        continue;
-        $("#output").append("<div><dt><code class=\"disabled\">" + id + "()</code></dt><dd></dd></div>");
-      }
       var val;
       try {
-        val = entries[id].getString(data);
+        val = L20n.format(ctx, L20n.lang, args, entries[id])[1];
       } catch (e) {
-        if (e.source) {
-          val = e.source;
-        } else {
-          $("#output").append("<div><dt><code class=\"disabled\">" + e.entry + "</code></dt><dd></dd></div>");
-          continue;
-        }
+        $("#output").append(
+          "<div><dt><code class=\"disabled\">" + id +
+          "</code></dt><dd></dd></div>");
+        $("#errors").append(
+          "<dt>" + e.name + " in entity <code>" + e.id + 
+          "</code></dt><dd>" + escapeHtml(e.message) + "</dd>");
+        continue;
       }
-      $("#output").append("<div><dt><code>" + id + "</code></dt><dd>" + val + "</dd></div>");
+      $("#output").append(
+        "<div><dt><code>" + id + "</code></dt><dd>" + escapeHtml(val) +
+        "</dd></div>");
     }
   }
 
@@ -63,17 +62,31 @@ $(function() {
 
   /* Errors */
 
-  parser.addEventListener('error', function(e) {
-    var pos = source.getSession().getDocument().indexToPosition(e.pos);
-    $("#errors").append("<dt>Syntax error near row " + (pos.row + 1) + 
-                        ", column " + (pos.column + 1) + "</dt><dd>" + 
-                        e.message + "</dd>");
-  });
-  compiler.addEventListener('error', function(e) {
-    $("#errors").append("<dt>" + e.name + " in entity <code>" + e.entry + 
-                        "</code></dt><dd>" + e.message + "</dd>");
-  });
+  function noop() { }
+  function log(e) {
+    var pos = source.getSession().getDocument().indexToPosition(e._pos.start);
+    $("#errors").append(
+      "<dt>Syntax error near row " + (pos.row + 1) + ", column " +
+      (pos.column + 1) + "</dt><dd>" + escapeHtml(e.message) + "</dd>");
+  }
 
+  var entityMap = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': '&quot;',
+    "'": '&#39;',
+    "/": '&#x2F;'
+  };
+
+  function replaceHtml(char) {
+    return entityMap[char];
+  }
+
+  function escapeHtml(str) {
+    return config.escapeHtml ?
+      str.replace(/[&<>"'\/]/g, replaceHtml) : str;
+  }
 
 
   /* Linkify */
@@ -90,14 +103,13 @@ $(function() {
     var state = {
       source: source.getValue(),
       context: context.getValue(),
-    }
-    return window.location.href.split("#")[0] + '#' + utf8_to_b64(JSON.stringify(state));
+    };
+    return window.location.href.split("#")[0] + '#' +
+      utf8_to_b64(JSON.stringify(state));
   }
 
 
-
   /* Main Code */
-
 
   var hash = window.location.hash.slice(1) || defaultHash;
   var state = JSON.parse(b64_to_utf8(hash));
@@ -115,6 +127,11 @@ $(function() {
   }).click(function() {
     $('#share-url').val(linkify()).focus().select();
     $(this).popover('toggle');
+  });
+
+  $('#escape-html').click(function() {
+    config.escapeHtml = !config.escapeHtml;
+    update();
   });
 
   window.addEventListener("resize", update);
